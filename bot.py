@@ -215,6 +215,7 @@ def job_resumo_23h():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json or {}
+    print(f"[BOT] Webhook recebido: {data}")
 
     # Verifica se é mensagem recebida
     evento = data.get('event', '')

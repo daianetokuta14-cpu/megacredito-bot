@@ -17,10 +17,10 @@ EVOLUTION_URL      = os.environ.get("EVOLUTION_URL", "https://evolution-api-prod
 EVOLUTION_KEY      = os.environ.get("EVOLUTION_KEY", "megacredito2025")
 INSTANCE           = os.environ.get("EVOLUTION_INSTANCE", "MegaCrédito")
 MEGACREDITO_URL    = os.environ.get("MEGACREDITO_URL", "https://wholesome-empathy-production-af46.up.railway.app")
-MEGACREDITO_KEY    = os.environ.get("MEGACREDITO_KEY", "megacredito2025")  # sua API key do sistema
-OWNER_NUMBER       = os.environ.get("OWNER_NUMBER", "558108071830883")     # número do Felipe com 55
+MEGACREDITO_KEY    = os.environ.get("MEGACREDITO_KEY", "megacredito2025")
+OWNER_NUMBER       = os.environ.get("OWNER_NUMBER", "558108071830883")
 GEMINI_KEY         = os.environ.get("GEMINI_API_KEY", "")
-BOT_SECRET         = os.environ.get("BOT_SECRET", "megabot2025")           # segredo do webhook
+BOT_SECRET         = os.environ.get("BOT_SECRET", "megabot2025")
 
 app = Flask(__name__)
 
@@ -36,8 +36,10 @@ def enviar_texto(numero: str, texto: str):
         numero = '55' + numero
     url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE}"
     payload = {"number": numero, "text": texto}
+    print(f"[BOT] Enviando para {numero} | URL: {url}")
     try:
         r = requests.post(url, json=payload, headers=headers(), timeout=15)
+        print(f"[BOT] Resposta Evolution: {r.status_code} | {r.text[:200]}")
         return r.ok
     except Exception as e:
         print(f"[BOT] Erro ao enviar para {numero}: {e}")
@@ -105,7 +107,6 @@ def registrar_pagamento(cliente_id: int, valor: float, obs: str = ""):
 def buscar_cliente_por_numero(numero: str):
     """Busca cliente pelo número de WhatsApp."""
     numero_limpo = re.sub(r'\D', '', numero)
-    # Remove o 55 do início para comparar
     if numero_limpo.startswith('55') and len(numero_limpo) > 11:
         numero_limpo = numero_limpo[2:]
     try:
@@ -164,10 +165,10 @@ def job_cobranca_18h():
     for c in inadimplentes:
         if not c.get('whatsapp'):
             continue
-        nome        = c['nome'].split()[0]  # primeiro nome
-        dias        = c['dias_atraso']
-        valor       = c['valor_atraso']
-        diarias     = c['diarias_pagas']
+        nome    = c['nome'].split()[0]
+        dias    = c['dias_atraso']
+        valor   = c['valor_atraso']
+        diarias = c['diarias_pagas']
         msg = (
             f"Olá *{nome}*! 👋\n\n"
             f"Passando para lembrar que você está com *{dias} dia(s) em atraso* "
@@ -184,16 +185,15 @@ def job_cobranca_18h():
 def job_resumo_23h():
     """Envia resumo do dia para o owner às 23h."""
     print(f"[BOT] {datetime.now()} — Enviando resumo para owner")
-    stats       = get_stats()
+    stats         = get_stats()
     inadimplentes = get_inadimplentes()
-    hoje        = date.today().strftime('%d/%m/%Y')
-    total_hoje  = stats.get('total_hoje', 0)
-    total_mes   = stats.get('total_mes', 0)
-    em_atraso   = stats.get('em_atraso', 0)
+    hoje          = date.today().strftime('%d/%m/%Y')
+    total_hoje    = stats.get('total_hoje', 0)
+    total_mes     = stats.get('total_mes', 0)
+    em_atraso     = stats.get('em_atraso', 0)
 
-    # Monta lista de inadimplentes
     lista_inad = ""
-    for c in inadimplentes[:15]:  # máximo 15 para não ficar gigante
+    for c in inadimplentes[:15]:
         lista_inad += f"  • {c['nome']} — {c['dias_atraso']}d — R$ {c['valor_atraso']:.2f}\n"
     if not lista_inad:
         lista_inad = "  ✅ Nenhum inadimplente hoje!\n"
@@ -217,15 +217,13 @@ def webhook():
     data = request.json or {}
     print(f"[BOT] Webhook recebido: {data}")
 
-    # Verifica se é mensagem recebida
     evento = data.get('event', '')
     if evento not in ('messages.upsert', 'message.received', 'MESSAGES_UPSERT'):
         return jsonify(ok=True)
 
-    msg_data = data.get('data', {})
-    key      = msg_data.get('key', {})
+    msg_data   = data.get('data', {})
+    key        = msg_data.get('key', {})
 
-    # Ignora mensagens enviadas pelo próprio bot
     if key.get('fromMe'):
         return jsonify(ok=True)
 
@@ -234,16 +232,15 @@ def webhook():
     message    = msg_data.get('message', {})
     message_id = key.get('id', '')
 
-    # ── Detecta tipo de mensagem ──
+    print(f"[BOT] Mensagem de {numero} | tipo: {list(message.keys())}")
+
     tem_imagem = 'imageMessage' in message
     tem_pdf    = ('documentMessage' in message and
                   'pdf' in (message.get('documentMessage', {}).get('mimetype', '')))
-    tem_audio  = 'audioMessage' in message
 
     if tem_imagem or tem_pdf:
-        # Tenta ler como comprovante
-        mime   = "image/jpeg" if tem_imagem else "application/pdf"
-        midia  = baixar_midia(message_id)
+        mime  = "image/jpeg" if tem_imagem else "application/pdf"
+        midia = baixar_midia(message_id)
         if not midia:
             enviar_texto(numero, "❌ Não consegui baixar o arquivo. Tente novamente.")
             return jsonify(ok=True)
@@ -253,7 +250,6 @@ def webhook():
             enviar_texto(numero, "❌ Não consegui ler o valor do comprovante. Manda uma foto mais nítida.")
             return jsonify(ok=True)
 
-        # Busca o cliente pelo número
         cliente = buscar_cliente_por_numero(numero)
         if not cliente:
             enviar_texto(numero,
@@ -262,7 +258,6 @@ def webhook():
             )
             return jsonify(ok=True)
 
-        # Registra o pagamento
         ok = registrar_pagamento(cliente['id'], valor, obs="Comprovante via WhatsApp")
         nome = cliente['nome'].split()[0]
         if ok:
@@ -272,7 +267,6 @@ def webhook():
                 f"📊 Suas diárias foram atualizadas!\n\n"
                 f"Obrigado! 🙏"
             )
-            # Avisa o owner também
             enviar_texto(OWNER_NUMBER,
                 f"💰 *Pagamento recebido!*\n"
                 f"Cliente: {cliente['nome']}\n"
@@ -289,7 +283,8 @@ def webhook():
         texto = (message.get('conversation') or
                  message.get('extendedTextMessage', {}).get('text', '')).lower().strip()
 
-        # Comandos básicos
+        print(f"[BOT] Texto recebido: '{texto}'")
+
         if any(p in texto for p in ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite']):
             cliente = buscar_cliente_por_numero(numero)
             nome    = cliente['nome'].split()[0] if cliente else "cliente"
@@ -328,7 +323,6 @@ def webhook():
 
 @app.route('/disparar/cobranca', methods=['POST'])
 def disparar_cobranca():
-    """Dispara cobrança manualmente (protegido por secret)."""
     if request.headers.get('X-Secret') != BOT_SECRET:
         return jsonify(erro="não autorizado"), 403
     job_cobranca_18h()
@@ -336,7 +330,6 @@ def disparar_cobranca():
 
 @app.route('/disparar/resumo', methods=['POST'])
 def disparar_resumo():
-    """Dispara resumo manualmente."""
     if request.headers.get('X-Secret') != BOT_SECRET:
         return jsonify(erro="não autorizado"), 403
     job_resumo_23h()

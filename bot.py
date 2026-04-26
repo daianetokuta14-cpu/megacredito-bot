@@ -5,7 +5,7 @@ Bot MegaCrédito — Evolution API
 - Webhook: lê comprovante (foto/PDF) e dá baixa automática
 """
 
-import os, re, base64, requests
+import os, re, base64, requests, json
 from datetime import date, datetime
 from flask import Flask, request, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,7 +18,7 @@ INSTANCE           = os.environ.get("EVOLUTION_INSTANCE", "MegaCrédito")
 MEGACREDITO_URL    = os.environ.get("MEGACREDITO_URL", "https://wholesome-empathy-production-af46.up.railway.app")
 MEGACREDITO_KEY    = os.environ.get("MEGACREDITO_KEY", "megacredito2025")
 OWNER_NUMBER       = os.environ.get("OWNER_NUMBER", "8108071830883")
-OPENAI_KEY         = os.environ.get("OPENAI_API_KEY", "")   # ← cole sua key aqui ou no Railway
+OPENAI_KEY         = os.environ.get("OPENAI_API_KEY", "")
 BOT_SECRET         = os.environ.get("BOT_SECRET", "megabot2025")
 
 app = Flask(__name__)
@@ -29,7 +29,6 @@ def headers():
     return {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"}
 
 def enviar_texto(numero: str, texto: str):
-    """Envia mensagem de texto via Evolution API."""
     numero = re.sub(r'\D', '', numero)
     if not numero.startswith('55'):
         numero = '55' + numero
@@ -43,14 +42,15 @@ def enviar_texto(numero: str, texto: str):
         return False
 
 def baixar_midia(message_id: str) -> bytes | None:
-    """Baixa mídia (foto/PDF) de uma mensagem."""
     url = f"{EVOLUTION_URL}/chat/getBase64FromMediaMessage/{INSTANCE}"
     try:
         r = requests.post(url, json={"message": {"key": {"id": message_id}}},
                           headers=headers(), timeout=30)
+        print(f"[BOT] baixar_midia status: {r.status_code}")
         if r.ok:
             data = r.json()
             b64 = data.get("base64", "")
+            print(f"[BOT] base64 recebido: {len(b64)} chars")
             if b64:
                 return base64.b64decode(b64)
     except Exception as e:
@@ -60,13 +60,8 @@ def baixar_midia(message_id: str) -> bytes | None:
 # ── Helpers MegaCrédito API ──────────────────────────────────────
 
 def get_inadimplentes():
-    """Busca clientes inadimplentes no MegaCrédito."""
     try:
-        r = requests.get(
-            f"{MEGACREDITO_URL}/api/inadimplentes",
-            headers={"X-API-Key": MEGACREDITO_KEY},
-            timeout=10
-        )
+        r = requests.get(f"{MEGACREDITO_URL}/api/inadimplentes", headers={"X-API-Key": MEGACREDITO_KEY}, timeout=10)
         if r.ok:
             return r.json()
     except Exception as e:
@@ -74,42 +69,18 @@ def get_inadimplentes():
     return []
 
 def get_stats():
-    """Busca estatísticas do dia."""
     try:
-        r = requests.get(
-            f"{MEGACREDITO_URL}/api/stats",
-            headers={"X-API-Key": MEGACREDITO_KEY},
-            timeout=10
-        )
+        r = requests.get(f"{MEGACREDITO_URL}/api/stats", headers={"X-API-Key": MEGACREDITO_KEY}, timeout=10)
         if r.ok:
             return r.json()
     except Exception as e:
         print(f"[BOT] Erro ao buscar stats: {e}")
     return {}
 
-def registrar_pagamento(cliente_id: int, valor: float, obs: str = ""):
-    """Dá baixa no pagamento via API do MegaCrédito."""
-    try:
-        r = requests.post(
-            f"{MEGACREDITO_URL}/api/pagar/{cliente_id}",
-            json={"valor": valor, "obs": obs},
-            headers={"X-API-Key": MEGACREDITO_KEY},
-            timeout=10
-        )
-        return r.ok
-    except Exception as e:
-        print(f"[BOT] Erro ao registrar pagamento: {e}")
-    return False
-
 def registrar_pagamento_retorno(cliente_id: int, valor: float, obs: str = ""):
-    """Dá baixa no pagamento e retorna dados atualizados."""
     try:
-        r = requests.post(
-            f"{MEGACREDITO_URL}/api/pagar/{cliente_id}",
-            json={"valor": valor, "obs": obs},
-            headers={"X-API-Key": MEGACREDITO_KEY},
-            timeout=10
-        )
+        r = requests.post(f"{MEGACREDITO_URL}/api/pagar/{cliente_id}", json={"valor": valor, "obs": obs},
+                          headers={"X-API-Key": MEGACREDITO_KEY}, timeout=10)
         if r.ok:
             return r.json()
     except Exception as e:
@@ -117,16 +88,12 @@ def registrar_pagamento_retorno(cliente_id: int, valor: float, obs: str = ""):
     return None
 
 def buscar_cliente_por_numero(numero: str):
-    """Busca cliente pelo número de WhatsApp."""
     numero_limpo = re.sub(r'\D', '', numero)
     if numero_limpo.startswith('55') and len(numero_limpo) > 11:
         numero_limpo = numero_limpo[2:]
     try:
-        r = requests.get(
-            f"{MEGACREDITO_URL}/api/cliente_por_whatsapp/{numero_limpo}",
-            headers={"X-API-Key": MEGACREDITO_KEY},
-            timeout=10
-        )
+        r = requests.get(f"{MEGACREDITO_URL}/api/cliente_por_whatsapp/{numero_limpo}",
+                         headers={"X-API-Key": MEGACREDITO_KEY}, timeout=10)
         if r.ok:
             return r.json()
     except Exception as e:
@@ -136,51 +103,34 @@ def buscar_cliente_por_numero(numero: str):
 # ── Leitura de Comprovante com GPT-4o ───────────────────────────
 
 def extrair_valor_comprovante(imagem_bytes: bytes, mime: str = "image/jpeg") -> float | None:
-    """Usa GPT-4o Vision para extrair o valor do comprovante (imagem ou PDF)."""
     if not OPENAI_KEY:
         print("[BOT] OPENAI_API_KEY não configurada")
         return None
     try:
         client = OpenAI(api_key=OPENAI_KEY)
-
-        # Converte bytes para base64
         b64 = base64.b64encode(imagem_bytes).decode("utf-8")
-
-        # GPT-4o aceita imagens via base64; para PDF converte para imagem antes se necessário
-        # Aqui usamos image_url com data URI
         data_uri = f"data:{mime};base64,{b64}"
-
         response = client.chat.completions.create(
             model="gpt-4o",
             max_tokens=100,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": data_uri, "detail": "low"},
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Este é um comprovante de pagamento brasileiro. "
-                                "Extraia APENAS o valor total transferido/pago em reais. "
-                                "Responda SOMENTE com o número, sem R$, sem texto. "
-                                "Use ponto como separador decimal. "
-                                "Exemplo: 150.00"
-                            ),
-                        },
-                    ],
-                }
-            ],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "low"}},
+                    {"type": "text", "text": (
+                        "Este é um comprovante de pagamento brasileiro. "
+                        "Extraia APENAS o valor total transferido/pago em reais. "
+                        "Responda SOMENTE com o número, sem R$, sem texto. "
+                        "Use ponto como separador decimal. Exemplo: 150.00"
+                    )},
+                ],
+            }],
         )
-
         texto = response.choices[0].message.content.strip()
+        print(f"[BOT] GPT-4o respondeu: {texto}")
         texto = texto.replace(',', '.').replace('R$', '').strip()
         valor = float(re.search(r'[\d.]+', texto).group())
         return valor
-
     except Exception as e:
         print(f"[BOT] Erro ao extrair valor com GPT-4o: {e}")
         return None
@@ -188,7 +138,6 @@ def extrair_valor_comprovante(imagem_bytes: bytes, mime: str = "image/jpeg") -> 
 # ── Jobs Agendados ───────────────────────────────────────────────
 
 def job_cobranca_18h():
-    """Envia cobranças para inadimplentes às 18h."""
     print(f"[BOT] {datetime.now()} — Iniciando cobrança 18h")
     inadimplentes = get_inadimplentes()
     enviados = 0
@@ -201,8 +150,7 @@ def job_cobranca_18h():
         diarias = c['diarias_pagas']
         msg = (
             f"Olá *{nome}*! 👋\n\n"
-            f"Passando para lembrar que você está com *{dias} dia(s) em atraso* "
-            f"no MegaCrédito.\n\n"
+            f"Passando para lembrar que você está com *{dias} dia(s) em atraso* no MegaCrédito.\n\n"
             f"💰 *Valor em aberto: R$ {valor:.2f}*\n"
             f"📊 Diárias pagas: {diarias}/20\n\n"
             f"Regularize hoje para evitar juros! 🙏\n"
@@ -213,7 +161,6 @@ def job_cobranca_18h():
     print(f"[BOT] Cobranças enviadas: {enviados}/{len(inadimplentes)}")
 
 def job_resumo_23h():
-    """Envia resumo do dia para o owner às 23h."""
     print(f"[BOT] {datetime.now()} — Enviando resumo para owner")
     stats         = get_stats()
     inadimplentes = get_inadimplentes()
@@ -221,13 +168,11 @@ def job_resumo_23h():
     total_hoje    = stats.get('total_hoje', 0)
     total_mes     = stats.get('total_mes', 0)
     em_atraso     = stats.get('em_atraso', 0)
-
     lista_inad = ""
     for c in inadimplentes[:15]:
         lista_inad += f"  • {c['nome']} — {c['dias_atraso']}d — R$ {c['valor_atraso']:.2f}\n"
     if not lista_inad:
         lista_inad = "  ✅ Nenhum inadimplente hoje!\n"
-
     msg = (
         f"📊 *RESUMO MEGACRÉDITO — {hoje}*\n"
         f"{'─'*30}\n\n"
@@ -246,9 +191,10 @@ def job_resumo_23h():
 def webhook():
     data = request.json or {}
 
-    evento = data.get('event', '')
-    print(f"[BOT] Webhook recebido — evento: {evento}")
+    # ★ LOG COMPLETO — mostra tudo que chega do Evolution API
+    print(f"[BOT] PAYLOAD COMPLETO: {json.dumps(data, ensure_ascii=False)[:2000]}")
 
+    evento = data.get('event', '')
     if evento not in ('messages.upsert', 'message.received'):
         return jsonify(ok=True)
 
@@ -263,15 +209,14 @@ def webhook():
     message    = msg_data.get('message', {})
     message_id = key.get('id', '')
 
-    print(f"[BOT] Mensagem de: {numero}")
+    print(f"[BOT] De: {numero} | ID: {message_id}")
     print(f"[BOT] Chaves da mensagem: {list(message.keys())}")
 
     tem_imagem = 'imageMessage' in message
     tem_pdf    = ('documentMessage' in message and
                   'pdf' in (message.get('documentMessage', {}).get('mimetype', '')))
-    tem_audio  = 'audioMessage' in message
 
-    print(f"[BOT] tem_imagem={tem_imagem} | tem_pdf={tem_pdf} | tem_audio={tem_audio}")
+    print(f"[BOT] tem_imagem={tem_imagem} | tem_pdf={tem_pdf}")
 
     if tem_imagem or tem_pdf:
         mime  = "image/jpeg" if tem_imagem else "application/pdf"
@@ -299,23 +244,20 @@ def webhook():
             diarias_pagas = resultado.get('diarias_pagas', cliente['diarias_pagas'])
             diarias_novas = resultado.get('diarias_novas', 0)
             restantes     = 20 - diarias_pagas
-
             if diarias_pagas >= 20:
-                msg_parcelas = f"🎉 *Parabéns! Você completou todas as 20 diárias!*\nAguarde a renovação do contrato."
+                msg_parcelas = "🎉 *Parabéns! Você completou todas as 20 diárias!*\nAguarde a renovação do contrato."
             elif diarias_novas == 0:
-                msg_parcelas = f"⏳ Pagamento parcial registrado. Continue pagando para completar a próxima diária."
+                msg_parcelas = "⏳ Pagamento parcial registrado. Continue pagando para completar a próxima diária."
             else:
                 msg_parcelas = (
                     f"📊 *{diarias_pagas}/20 diárias pagas*\n"
                     f"✅ +{diarias_novas} diária(s) neste pagamento\n"
                     f"📅 Faltam {restantes} diária(s) para concluir"
                 )
-
             enviar_texto(numero,
                 f"✅ *Pagamento confirmado, {nome}!*\n\n"
                 f"💰 Valor: R$ {valor:.2f}\n\n"
-                f"{msg_parcelas}\n\n"
-                f"Obrigado! 🙏"
+                f"{msg_parcelas}\n\nObrigado! 🙏"
             )
             enviar_texto(OWNER_NUMBER,
                 f"💰 *Pagamento recebido!*\n"
@@ -344,7 +286,6 @@ def webhook():
                 f"📊 Para ver seu saldo, digite *saldo*.\n"
                 f"❓ Para falar com atendente, digite *atendente*."
             )
-
         elif 'saldo' in texto:
             cliente = buscar_cliente_por_numero(numero)
             if cliente:
@@ -357,7 +298,6 @@ def webhook():
                 )
             else:
                 enviar_texto(numero, "❌ Não encontrei seu cadastro. Fale com o atendente.")
-
         elif 'atendente' in texto or 'humano' in texto:
             enviar_texto(numero, "👤 Aguarde, vou chamar o atendente...")
             enviar_texto(OWNER_NUMBER,

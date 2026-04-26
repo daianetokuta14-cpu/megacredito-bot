@@ -139,7 +139,7 @@ def extrair_valor_comprovante(imagem_bytes: bytes, mime: str = "image/jpeg") -> 
         )
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=[
                 types.Part.from_bytes(data=imagem_bytes, mime_type=mime),
                 prompt

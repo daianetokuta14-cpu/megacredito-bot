@@ -18,7 +18,7 @@ EVOLUTION_KEY      = os.environ.get("EVOLUTION_KEY", "megacredito2025")
 INSTANCE           = os.environ.get("EVOLUTION_INSTANCE", "MegaCrédito")
 MEGACREDITO_URL    = os.environ.get("MEGACREDITO_URL", "https://wholesome-empathy-production-af46.up.railway.app")
 MEGACREDITO_KEY    = os.environ.get("MEGACREDITO_KEY", "megacredito2025")  # sua API key do sistema
-OWNER_NUMBER       = os.environ.get("OWNER_NUMBER", "558108071830883")     # número do Felipe com 55
+OWNER_NUMBER       = os.environ.get("OWNER_NUMBER", "8108071830883")     # número do Felipe com 55
 GEMINI_KEY         = os.environ.get("GEMINI_API_KEY", "")
 BOT_SECRET         = os.environ.get("BOT_SECRET", "megabot2025")           # segredo do webhook
 

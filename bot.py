@@ -218,7 +218,7 @@ def webhook():
 
     # Verifica se é mensagem recebida
     evento = data.get('event', '')
-    if evento not in ('messages.upsert', 'message.received'):
+    if evento not in ('messages.upsert', 'message.received', 'MESSAGES_UPSERT'):
         return jsonify(ok=True)
 
     msg_data = data.get('data', {})

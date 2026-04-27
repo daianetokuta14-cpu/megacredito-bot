@@ -143,20 +143,53 @@ def extrair_valor_comprovante(imagem_bytes: bytes, mime: str = "image/jpeg") -> 
 
 # ── Jobs Agendados ───────────────────────────────────────────────
 
+def pagou_hoje(cliente_id: int) -> bool:
+    """Verifica se o cliente fez algum pagamento hoje."""
+    try:
+        r = requests.get(
+            f"{MEGACREDITO_URL}/api/pagamentos_hoje/{cliente_id}",
+            headers={"X-API-Key": MEGACREDITO_KEY},
+            timeout=10
+        )
+        if r.ok:
+            return r.json().get('pagou_hoje', False)
+    except Exception as e:
+        print(f"[BOT] Erro ao checar pagamento hoje: {e}")
+    return False
+
+def gerar_aviso_dias_atraso(dias: int) -> str:
+    """Gera texto listando os dias em atraso."""
+    from datetime import timedelta
+    hoje = date.today()
+    dias_lista = []
+    for i in range(dias, 0, -1):
+        d = hoje - timedelta(days=i)
+        dias_lista.append(d.strftime('%d/%m'))
+    if len(dias_lista) == 1:
+        return f"⚠️ Dia em atraso: *{dias_lista[0]}*"
+    return f"⚠️ Dias em atraso: *{', '.join(dias_lista)}*"
+
 def job_cobranca_18h():
     print(f"[BOT] {datetime.now()} — Iniciando cobrança 18h")
     inadimplentes = get_inadimplentes()
     enviados = 0
+    pulados  = 0
     for c in inadimplentes:
         if not c.get('whatsapp'):
+            continue
+        # Não cobra quem já pagou hoje
+        if pagou_hoje(c['id']):
+            pulados += 1
             continue
         nome    = c['nome'].split()[0]
         dias    = c['dias_atraso']
         valor   = c['valor_atraso']
         diarias = c['diarias_pagas']
+        aviso_dias = gerar_aviso_dias_atraso(dias)
         msg = (
             f"Olá *{nome}*! 👋\n\n"
             f"Passando para lembrar que você está com *{dias} dia(s) em atraso* no MegaCrédito.\n\n"
+            f"{aviso_dias}\n"
             f"💰 *Valor em aberto: R$ {valor:.2f}*\n"
             f"📊 Diárias pagas: {diarias}/20\n\n"
             f"Regularize hoje para evitar juros! 🙏\n"
@@ -164,7 +197,7 @@ def job_cobranca_18h():
         )
         if enviar_texto(c['whatsapp'], msg):
             enviados += 1
-    print(f"[BOT] Cobranças enviadas: {enviados}/{len(inadimplentes)}")
+    print(f"[BOT] Cobranças enviadas: {enviados} | Pulados (pagaram hoje): {pulados}")
 
 def job_resumo_23h():
     print(f"[BOT] {datetime.now()} — Enviando resumo para owner")
@@ -260,10 +293,18 @@ def webhook():
                     f"✅ +{diarias_novas} diária(s) neste pagamento\n"
                     f"📅 Faltam {restantes} diária(s) para concluir"
                 )
+            # Aviso de dias ainda em atraso após o pagamento
+            dias_restantes = resultado.get('dias_em_atraso', 0)
+            aviso_atraso = ""
+            if dias_restantes > 0:
+                aviso_atraso = "\n\n" + gerar_aviso_dias_atraso(dias_restantes) + f" ainda em aberto\n💸 Valor pendente: R$ {resultado.get('valor_em_atraso', 0):.2f}"
+
             enviar_texto(numero,
                 f"✅ *Pagamento confirmado, {nome}!*\n\n"
                 f"💰 Valor: R$ {valor:.2f}\n\n"
-                f"{msg_parcelas}\n\nObrigado! 🙏"
+                f"{msg_parcelas}"
+                f"{aviso_atraso}\n\n"
+                f"Obrigado! 🙏"
             )
             enviar_texto(OWNER_NUMBER,
                 f"💰 *Pagamento recebido!*\n"

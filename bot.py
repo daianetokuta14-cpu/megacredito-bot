@@ -148,8 +148,11 @@ def registrar_pagamento(cliente_id: int, valor: float, obs: str,
                           json={"valor": valor, "obs": obs,
                                 "hash_arquivo": hash_arquivo, "codigo_tx": codigo_tx},
                           headers=_api_headers(), timeout=10)
+        print(f"[BOT] registrar_pagamento status={r.status_code} body={r.text[:300]}")
         if r.ok:
             return r.json()
+        else:
+            print(f"[BOT] ERRO ao registrar: {r.status_code} — {r.text}")
     except Exception as e:
         print(f"[BOT] Erro ao registrar pagamento: {e}")
     return None
@@ -549,6 +552,7 @@ def webhook():
 
         # ── 1. Buscar cliente pelo número (8 últimos dígitos) ─────
         cliente = buscar_cliente_por_numero(numero)
+        print(f"[BOT] buscar_cliente numero={numero} resultado={cliente}")
         if not cliente:
             enviar_texto(numero,
                 "⚠️ Comprovante recebido, mas seu número não está cadastrado.\n"
@@ -675,11 +679,13 @@ def webhook():
                 f"⚠️ Comprovante recebido (R$ {valor:.2f}), mas ocorreu um erro ao registrar. "
                 f"Fale com o atendente."
             )
-            enviar_alerta_admins(
+            # Erro técnico — só owner, não funcionária
+            enviar_texto(OWNER_NUMBER,
                 f"🚨 *Erro ao registrar pagamento!*\n"
                 f"Cliente: {cliente['nome']}\n"
                 f"Valor: R$ {valor:.2f}\n"
                 f"Número: +{numero}\n"
+                f"TX: {codigo_tx or 'n/i'}\n"
                 f"Verificar manualmente."
             )
 

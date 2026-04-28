@@ -7,4 +7,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
 EXPOSE 5001
-CMD ["gunicorn", "bot:app", "--bind", "0.0.0.0:5001", "--workers", "1", "--timeout", "120"]
+CMD ["gunicorn", "bot:app", "--bind", "0.0.0.0:5001", "--workers", "1", "--worker-class", "gthread", "--threads", "4", "--timeout", "300", "--graceful-timeout", "300", "--keep-alive", "5"]

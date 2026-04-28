@@ -7,7 +7,7 @@ Bot MegaCrédito — Evolution API
 - Antifraude: hash SHA-256 + código TX + nome + extrato bancário
 """
 
-import os, re, base64, requests, json, hashlib
+import os, re, base64, requests, json, hashlib, threading
 from datetime import date, datetime, timedelta
 from flask import Flask, request, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -501,24 +501,24 @@ def job_backup_2350():
 
 # ── Webhook ──────────────────────────────────────────────────────
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.json or {}
-    print(f"[BOT] PAYLOAD: {json.dumps(data, ensure_ascii=False)[:500]}")
-
-    evento = data.get('event', '')
-    if evento not in ('messages.upsert', 'message.received'):
-        return jsonify(ok=True)
-
+def processar_mensagem(data: dict):
+    """Processa a mensagem em background — libera o webhook imediatamente."""
     msg_data   = data.get('data', {})
     key        = msg_data.get('key', {})
-    if key.get('fromMe'):
-        return jsonify(ok=True)
-
     remoteJid  = key.get('remoteJid', '')
     numero     = remoteJid.replace('@s.whatsapp.net', '')
     message    = msg_data.get('message', {})
     message_id = key.get('id', '')
+
+    print(f"[BOT] De: {numero} | Chaves: {list(message.keys())}")
+
+    tem_imagem = 'imageMessage' in message
+    tem_pdf    = ('documentMessage' in message and
+                  'pdf' in (message.get('documentMessage', {}).get('mimetype', '')))
+
+    numero_limpo = re.sub(r'\D', '', numero)
+    owner_limpo  = re.sub(r'\D', '', OWNER_NUMBER)
+    is_owner     = numero_limpo.endswith(owner_limpo[-8:])
 
     print(f"[BOT] De: {numero} | Chaves: {list(message.keys())}")
 
@@ -536,11 +536,11 @@ def webhook():
         midia = baixar_midia(message_id)
         if not midia:
             enviar_texto(OWNER_NUMBER, "❌ Não consegui baixar o extrato. Tente novamente.")
-            return jsonify(ok=True)
+            return
         transacoes = extrair_transacoes_extrato(midia)
         print(f"[BOT] Transações extraídas: {len(transacoes)}")
         verificar_fraudes(transacoes)
-        return jsonify(ok=True)
+        return
 
     # ── Cliente enviou comprovante ───────────────────────────────
     if tem_imagem or tem_pdf:
@@ -548,7 +548,7 @@ def webhook():
         midia = baixar_midia(message_id)
         if not midia:
             enviar_texto(numero, "❌ Não consegui baixar o arquivo. Tente reenviar.")
-            return jsonify(ok=True)
+            return
 
         # ── 1. Buscar cliente pelo número (8 últimos dígitos) ─────
         cliente = buscar_cliente_por_numero(numero)
@@ -563,7 +563,7 @@ def webhook():
                 f"Número: +{numero}\n"
                 f"Hora: {datetime.now().strftime('%H:%M')}"
             )
-            return jsonify(ok=True)
+            return
 
         # ── 2. Extração via GPT-4o ────────────────────────────────
         dados = extrair_dados_comprovante(midia, mime)
@@ -580,7 +580,7 @@ def webhook():
                 f"Hora: {datetime.now().strftime('%H:%M')}\n"
                 f"⚠️ Leitura automática falhou — confirme e registre manualmente."
             )
-            return jsonify(ok=True)
+            return
 
         valor          = float(dados['valor'])
         hora           = dados.get('hora')
@@ -603,7 +603,7 @@ def webhook():
                     f"Valor: R$ {valor:.2f}\n"
                     f"TX ID: {codigo_tx}"
                 )
-                return jsonify(ok=True)
+                return
 
         # ── 4. Validar primeiro nome (aviso ao owner, não bloqueia) ─
         if nome_remetente:
@@ -702,7 +702,7 @@ def webhook():
                 clientes = get_clientes_ativos()
                 if not clientes:
                     enviar_texto(OWNER_NUMBER, "⚠️ Nenhum cliente ativo no momento.")
-                    return jsonify(ok=True)
+                    return
                 hoje = date.today().strftime('%d/%m/%Y')
                 linhas = []
                 for c in clientes:
@@ -729,7 +729,7 @@ def webhook():
                     f"👥 Total ativos: {len(clientes)}"
                 )
                 enviar_texto(OWNER_NUMBER, msg)
-                return jsonify(ok=True)
+                return
 
             # #atualizeiosite — recebe backup (texto) e sincroniza o banco
             if '#atualizeiosite' in texto:
@@ -800,7 +800,7 @@ def webhook():
                         "❌ Não consegui interpretar o backup enviado.\n"
                         "Certifique-se de enviar exatamente a mensagem de backup gerada pelo bot."
                     )
-                    return jsonify(ok=True)
+                    return
 
                 enviar_texto(OWNER_NUMBER,
                     f"⏳ Processando backup de *{len(clientes_parse)}* clientes..."
@@ -819,7 +819,7 @@ def webhook():
                     )
                 else:
                     enviar_texto(OWNER_NUMBER, "❌ Erro ao aplicar backup. Verifique os logs.")
-                return jsonify(ok=True)
+                return
 
         # ── Mensagens normais de clientes ─────────────────────────
         if any(p in texto for p in ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite']):
@@ -852,6 +852,22 @@ def webhook():
                 f"Hora: {datetime.now().strftime('%H:%M')}"
             )
 
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json or {}
+    print(f"[BOT] PAYLOAD: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+    evento = data.get('event', '')
+    if evento not in ('messages.upsert', 'message.received'):
+        return jsonify(ok=True)
+
+    key = data.get('data', {}).get('key', {})
+    if key.get('fromMe'):
+        return jsonify(ok=True)
+
+    # Responde imediatamente e processa em background
+    threading.Thread(target=processar_mensagem, args=(data,), daemon=True).start()
     return jsonify(ok=True)
 
 # ── Rotas manuais ────────────────────────────────────────────────

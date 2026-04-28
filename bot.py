@@ -193,14 +193,40 @@ def hora_para_minutos(hora_str: str) -> int | None:
 
 # ── GPT-4o: extração unificada do comprovante ────────────────────
 
+def pdf_para_imagem(pdf_bytes: bytes) -> bytes | None:
+    """Converte a primeira página do PDF em JPEG para enviar ao GPT-4o Vision."""
+    try:
+        from pdf2image import convert_from_bytes
+        from io import BytesIO
+        paginas = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=1)
+        if not paginas:
+            return None
+        buf = BytesIO()
+        paginas[0].save(buf, format='JPEG', quality=90)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[BOT] Erro ao converter PDF para imagem: {e}")
+        return None
+
+
 def extrair_dados_comprovante(imagem_bytes: bytes, mime: str = "image/jpeg") -> dict | None:
     """
-    Extrai em UMA chamada: valor, hora, nome do remetente e código de transação.
+    Extrai valor, hora, nome_remetente e codigo_tx do comprovante.
+    PDFs são convertidos para imagem antes de enviar ao GPT-4o (Vision só aceita imagens).
     Retorna: {valor, hora, nome_remetente, codigo_tx} ou None se falhar.
     """
     if not OPENAI_KEY:
         print("[BOT] OPENAI_API_KEY não configurada")
         return None
+
+    # GPT-4o Vision não aceita PDF — converte para JPEG primeiro
+    if 'pdf' in mime.lower():
+        imagem_bytes = pdf_para_imagem(imagem_bytes)
+        if not imagem_bytes:
+            print("[BOT] Falha ao converter PDF para imagem")
+            return None
+        mime = "image/jpeg"
+
     try:
         client   = OpenAI(api_key=OPENAI_KEY)
         b64      = base64.b64encode(imagem_bytes).decode("utf-8")

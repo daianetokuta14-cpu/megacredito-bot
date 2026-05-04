@@ -661,14 +661,7 @@ def processar_mensagem(data: dict):
                 f"{aviso_atraso}\n\n"
                 f"Obrigado! 🙏"
             )
-            enviar_texto(OWNER_NUMBER,
-                f"💰 *Pagamento recebido!*\n"
-                f"Cliente: {cliente['nome']}\n"
-                f"Valor: R$ {valor:.2f}\n"
-                f"Hora: {hora or '??:??'}\n"
-                f"Diárias: {diarias_pagas}/20\n"
-                f"Via: Comprovante WhatsApp"
-            )
+            # Notificação de pagamento removida — resumo diário às 23h já cobre isso
         else:
             enviar_texto(numero,
                 f"⚠️ Comprovante recebido (R$ {valor:.2f}), mas ocorreu um erro ao registrar. "

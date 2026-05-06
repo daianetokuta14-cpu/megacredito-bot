@@ -375,17 +375,29 @@ def job_cobranca_18h():
         nome    = c['nome'].split()[0]
         dias    = c['dias_atraso']
         valor   = c['valor_atraso']
-        diarias = c['diarias_pagas']
+        tipo    = c.get('tipo', 'diaria')
         aviso   = gerar_aviso_dias_atraso(dias)
-        msg = (
-            f"Olá *{nome}*! 👋\n\n"
-            f"Passando para lembrar que você está com *{dias} dia(s) em atraso* no MegaCrédito.\n\n"
-            f"{aviso}\n"
-            f"💰 *Valor em aberto: R$ {valor:.2f}*\n"
-            f"📊 Diárias pagas: {diarias}/20\n\n"
-            f"Regularize hoje para evitar juros! 🙏\n"
-            f"Qualquer dúvida é só responder aqui."
-        )
+
+        if tipo == 'mensalidade':
+            msg = (
+                f"Olá *{nome}*! 👋\n\n"
+                f"Passando para lembrar que sua mensalidade está em atraso há *{dias} dia(s)*.\n\n"
+                f"{aviso}\n"
+                f"💰 *Valor em aberto: R$ {valor:.2f}*\n\n"
+                f"Regularize hoje para evitar juros! 🙏\n"
+                f"Qualquer dúvida é só responder aqui."
+            )
+        else:
+            diarias = c['diarias_pagas']
+            msg = (
+                f"Olá *{nome}*! 👋\n\n"
+                f"Passando para lembrar que você está com *{dias} dia(s) em atraso* no MegaCrédito.\n\n"
+                f"{aviso}\n"
+                f"💰 *Valor em aberto: R$ {valor:.2f}*\n"
+                f"📊 Diárias pagas: {diarias}/20\n\n"
+                f"Regularize hoje para evitar juros! 🙏\n"
+                f"Qualquer dúvida é só responder aqui."
+            )
         if enviar_texto(c['whatsapp'], msg):
             enviados += 1
     print(f"[BOT] Cobranças enviadas: {enviados} | Pulados (pagaram hoje): {pulados}")
@@ -636,16 +648,30 @@ def processar_mensagem(data: dict):
                 'pag_id':     pag_id,
             })
 
-            if diarias_pagas >= 20:
-                msg_parcelas = "🎉 *Parabéns! Você completou todas as 20 diárias!*\nAguarde a renovação do contrato."
-            elif diarias_novas == 0:
-                msg_parcelas = "⏳ Pagamento parcial registrado. Continue pagando para completar a próxima diária."
+            tipo_cobranca = cliente.get('tipo_cobranca', 'diaria')
+
+            if tipo_cobranca == 'mensalidade':
+                parcela_paga = resultado.get('parcela_paga', False)
+                pendente     = resultado.get('pendente', 0)
+                if parcela_paga:
+                    msg_parcelas = "📆 *Mensalidade quitada!* ✅"
+                else:
+                    msg_parcelas = f"⏳ Pagamento parcial. Pendente: R$ {pendente:.2f}"
             else:
-                msg_parcelas = (
-                    f"📊 *{diarias_pagas}/20 diárias pagas*\n"
-                    f"✅ +{diarias_novas} diária(s) neste pagamento\n"
-                    f"📅 Faltam {restantes} diária(s) para concluir"
-                )
+                diarias_pagas = resultado.get('diarias_pagas', cliente.get('diarias_pagas', 0))
+                diarias_novas = resultado.get('diarias_novas', 0)
+                total_diarias = cliente.get('total_diarias', 20)
+                restantes     = total_diarias - diarias_pagas
+                if diarias_pagas >= total_diarias:
+                    msg_parcelas = f"🎉 *Parabéns! Você completou todas as {total_diarias} diárias!*\nAguarde a renovação do contrato."
+                elif diarias_novas == 0:
+                    msg_parcelas = "⏳ Pagamento parcial registrado. Continue pagando para completar a próxima diária."
+                else:
+                    msg_parcelas = (
+                        f"📊 *{diarias_pagas}/{total_diarias} diárias pagas*\n"
+                        f"✅ +{diarias_novas} diária(s) neste pagamento\n"
+                        f"📅 Faltam {restantes} diária(s) para concluir"
+                    )
 
             dias_restantes = resultado.get('dias_em_atraso', 0)
             aviso_atraso   = ""

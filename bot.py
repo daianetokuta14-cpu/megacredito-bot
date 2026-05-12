@@ -19,6 +19,7 @@ EVOLUTION_KEY   = os.environ.get("EVOLUTION_KEY", "megacredito2025")
 INSTANCE        = os.environ.get("EVOLUTION_INSTANCE", "MegaCrédito")
 MEGACREDITO_URL = os.environ.get("MEGACREDITO_URL", "https://wholesome-empathy-production-af46.up.railway.app")
 MEGACREDITO_KEY = os.environ.get("MEGACREDITO_KEY", "megacredito2025")
+TENANT_ID       = os.environ.get("TENANT_ID", "1")   # ← ID do tenant no banco (cada bot tem o seu)
 OWNER_NUMBER    = os.environ.get("OWNER_NUMBER", "8108071830883")
 FUNC_NUMBER     = os.environ.get("FUNC_NUMBER", "")   # ← adicionar no Railway quando tiver o número
 OPENAI_KEY      = os.environ.get("OPENAI_API_KEY", "")
@@ -74,7 +75,7 @@ def baixar_midia(message_id: str) -> bytes | None:
 # ── Helpers MegaCrédito API ──────────────────────────────────────
 
 def _api_headers():
-    return {"X-API-Key": MEGACREDITO_KEY}
+    return {"X-API-Key": MEGACREDITO_KEY, "X-Tenant-Id": TENANT_ID}
 
 def get_inadimplentes():
     try:
